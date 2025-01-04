@@ -1,103 +1,102 @@
 import os
-import yt_dlp
 import flet as ft
+from yt_dlp import YoutubeDL
+from pathlib import Path
 
-class YouTubeDownloader(ft.UserControl):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+def create_folder():
+    """Ensure 'damtube' folder exists in the internal storage."""
+    base_path = Path.home() / "Documents/damtube"
+    if not base_path.exists():
+        os.makedirs(base_path)
+    return str(base_path)
 
-        self.base_dir = ""
-        self.video_dir = ""
-        self.audio_dir = ""
-        self.video_formats = []
-        self.selected_format = None
+DAMTUBE_FOLDER = create_folder()
 
-    def build(self):
-        # Initialize storage folders
-        self.init_storage()
+def fetch_video_formats(url, page, quality_dropdown):
+    """Fetch available formats for the given YouTube URL."""
+    if not url.strip():
+        page.snack_bar = ft.SnackBar(ft.Text("Please enter a YouTube URL"))
+        page.snack_bar.open = True
+        page.update()
+        return
 
-        self.url_input = ft.TextField(label="Enter YouTube Video URL", hint_text="Paste URL here", width=300)
-        self.fetch_btn = ft.ElevatedButton(text="Fetch Available Qualities", on_click=self.fetch_formats)
-        self.quality_spinner = ft.Dropdown(label="Select Quality", width=300)
-        self.download_btn = ft.ElevatedButton(text="Download Video", on_click=self.download_video, disabled=True)
-        self.status_label = ft.Text()
+    try:
+        page.snack_bar = ft.SnackBar(ft.Text("Fetching video formats..."))
+        page.snack_bar.open = True
+        page.update()
 
-        return ft.Column(
-            [
-                self.url_input,
-                self.fetch_btn,
-                self.quality_spinner,
-                self.download_btn,
-                self.status_label,
-            ],
-            alignment=ft.MainAxisAlignment.CENTER,
-        )
-
-    def init_storage(self):
-        # Initialize base directory and subfolders
-        self.base_dir = os.path.join(ft.storage_path(), "Damtube")
-        self.video_dir = os.path.join(self.base_dir, "Video")
-        self.audio_dir = os.path.join(self.base_dir, "Audio")
-
-        os.makedirs(self.video_dir, exist_ok=True)
-        os.makedirs(self.audio_dir, exist_ok=True)
-
-    def fetch_formats(self, e):
-        url = self.url_input.value.strip()
-        if not url:
-            self.status_label.value = "Error: URL cannot be empty!"
-            self.update()
-            return
-
-        try:
-            with yt_dlp.YoutubeDL() as ydl:
-                info = ydl.extract_info(url, download=False)
-                formats = info.get('formats', [])
-
-            self.video_formats = formats
-            self.quality_spinner.options = [
-                f"{fmt.get('resolution', 'Audio Only')} - {fmt['format_id']}" for fmt in formats
+        ydl_opts = {"quiet": True, "noplaylist": True}
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            formats = info.get("formats", [])
+            quality_options = [
+                f"{f['format_id']} - {f['format_note']} - {f['ext']}"
+                for f in formats if "video" in f["acodec"]
             ]
-            self.status_label.value = "Qualities fetched successfully!"
-            self.download_btn.disabled = False
-            self.update()
 
-        except Exception as e:
-            self.status_label.value = f"Error: {e}"
-            self.update()
+        quality_dropdown.options = [ft.dropdown.Option(option) for option in quality_options]
+        quality_dropdown.value = quality_options[0] if quality_options else None
+        page.update()
+    except Exception as e:
+        page.snack_bar = ft.SnackBar(ft.Text(f"Error: {str(e)}"))
+        page.snack_bar.open = True
+        page.update()
 
-    def download_video(self, e):
-        url = self.url_input.value.strip()
-        selected_quality = self.quality_spinner.value
-        selected_format_id = selected_quality.split('-')[-1].strip()
+def download_video(url, format_id, page):
+    """Download the video in the selected format."""
+    if not url.strip() or not format_id:
+        page.snack_bar = ft.SnackBar(ft.Text("Please enter a valid URL and select a quality"))
+        page.snack_bar.open = True
+        page.update()
+        return
 
-        if not selected_format_id or selected_quality == 'Select Quality':
-            self.status_label.value = "Error: Please select a quality!"
-            self.update()
-            return
+    try:
+        page.snack_bar = ft.SnackBar(ft.Text("Downloading..."))
+        page.snack_bar.open = True
+        page.update()
 
-        save_path = self.audio_dir if "Audio Only" in selected_quality else self.video_dir
+        ydl_opts = {
+            "format": format_id.split(" - ")[0],
+            "outtmpl": f"{DAMTUBE_FOLDER}/%(title)s.%(ext)s",
+            "quiet": True,
+        }
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            title = info.get("title", "Video")
+            page.snack_bar = ft.SnackBar(ft.Text(f"Downloaded: {title}\nSaved to: {DAMTUBE_FOLDER}"))
+            page.snack_bar.open = True
+            page.update()
+    except Exception as e:
+        page.snack_bar = ft.SnackBar(ft.Text(f"Error: {str(e)}"))
+        page.snack_bar.open = True
+        page.update()
 
-        try:
-            ydl_opts = {
-                'format': selected_format_id,
-                'outtmpl': f"{save_path}/%(title)s.%(ext)s",
-            }
+def main(page: ft.Page):
+    page.title = "YouTube Video Downloader with Quality Selection"
+    page.scroll = "adaptive"
 
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
+    url_input = ft.TextField(label="YouTube URL", expand=True)
+    quality_dropdown = ft.Dropdown(label="Select Video Quality", expand=True)
+    fetch_button = ft.ElevatedButton(
+        "Fetch Formats",
+        on_click=lambda e: fetch_video_formats(url_input.value, page, quality_dropdown),
+    )
+    download_button = ft.ElevatedButton(
+        "Download",
+        on_click=lambda e: download_video(url_input.value, quality_dropdown.value, page),
+    )
 
-            self.status_label.value = f"Download successful! File saved in {save_path}"
-            self.update()
-
-        except Exception as e:
-            self.status_label.value = f"Error: {e}"
-            self.update()
-
-
-def main(page):
-    page.title = "Damtube"
-    page.add(YouTubeDownloader())
-
+    page.add(
+        ft.Column(
+            [
+                ft.Row([url_input, fetch_button], alignment="center"),
+                quality_dropdown,
+                download_button,
+                ft.Text(f"Downloads will be saved to: {DAMTUBE_FOLDER}"),
+            ],
+            alignment="center",
+            expand=True,
+        )
+    )
 
 ft.app(target=main)
