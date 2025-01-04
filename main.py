@@ -3,14 +3,20 @@ import flet as ft
 from yt_dlp import YoutubeDL
 from pathlib import Path
 
-def create_folder():
-    """Ensure 'damtube' folder exists in the internal storage."""
-    base_path = Path.home() / "Documents/damtube"
-    if not base_path.exists():
-        os.makedirs(base_path)
-    return str(base_path)
+def create_folder(page, permission_handler):
+    """Ensure 'damtube' folder exists in the app's internal storage."""
+    # Request storage permissions
+    if permission_handler.check_permission(ft.PermissionType.STORAGE) == ft.PermissionStatus.DENIED:
+        result = permission_handler.request_permission(ft.PermissionType.STORAGE)
+        if result != ft.PermissionStatus.GRANTED:
+            page.add(ft.Text("Storage permission denied. Cannot create the folder."))
+            return None
 
-DAMTUBE_FOLDER = create_folder()
+    # Use app's internal storage
+    base_path = Path.home() / "damtube"
+    if not base_path.exists():
+        os.makedirs(base_path, exist_ok=True)
+    return str(base_path)
 
 def fetch_video_formats(url, page, quality_dropdown):
     """Fetch available formats for the given YouTube URL."""
@@ -42,7 +48,7 @@ def fetch_video_formats(url, page, quality_dropdown):
         page.snack_bar.open = True
         page.update()
 
-def download_video(url, format_id, page):
+def download_video(url, format_id, page, damtube_folder):
     """Download the video in the selected format."""
     if not url.strip() or not format_id:
         page.snack_bar = ft.SnackBar(ft.Text("Please enter a valid URL and select a quality"))
@@ -57,13 +63,13 @@ def download_video(url, format_id, page):
 
         ydl_opts = {
             "format": format_id.split(" - ")[0],
-            "outtmpl": f"{DAMTUBE_FOLDER}/%(title)s.%(ext)s",
+            "outtmpl": f"{damtube_folder}/%(title)s.%(ext)s",
             "quiet": True,
         }
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             title = info.get("title", "Video")
-            page.snack_bar = ft.SnackBar(ft.Text(f"Downloaded: {title}\nSaved to: {DAMTUBE_FOLDER}"))
+            page.snack_bar = ft.SnackBar(ft.Text(f"Downloaded: {title}\nSaved to: {damtube_folder}"))
             page.snack_bar.open = True
             page.update()
     except Exception as e:
@@ -72,8 +78,16 @@ def download_video(url, format_id, page):
         page.update()
 
 def main(page: ft.Page):
-    page.title = "YouTube Video Downloader with Quality Selection"
-    page.scroll = "adaptive"
+    page.title = "YouTube Downloader with Permissions"
+    page.scroll = ft.ScrollMode.ADAPTIVE
+
+    ph = ft.PermissionHandler()
+    page.overlay.append(ph)
+
+    # Create folder and ensure permissions
+    damtube_folder = create_folder(page, ph)
+    if not damtube_folder:
+        return
 
     url_input = ft.TextField(label="YouTube URL", expand=True)
     quality_dropdown = ft.Dropdown(label="Select Video Quality", expand=True)
@@ -83,7 +97,7 @@ def main(page: ft.Page):
     )
     download_button = ft.ElevatedButton(
         "Download",
-        on_click=lambda e: download_video(url_input.value, quality_dropdown.value, page),
+        on_click=lambda e: download_video(url_input.value, quality_dropdown.value, page, damtube_folder),
     )
 
     page.add(
@@ -92,7 +106,7 @@ def main(page: ft.Page):
                 ft.Row([url_input, fetch_button], alignment="center"),
                 quality_dropdown,
                 download_button,
-                ft.Text(f"Downloads will be saved to: {DAMTUBE_FOLDER}"),
+                ft.Text(f"Downloads will be saved to: {damtube_folder}"),
             ],
             alignment="center",
             expand=True,
