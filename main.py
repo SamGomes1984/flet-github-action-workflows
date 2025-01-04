@@ -18,23 +18,30 @@ def fetch_video_formats(url, page, quality_dropdown, download_button):
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             formats = info.get("formats", [])
+            
+            # Safely extract format details with fallback for format_note
             quality_options = [
-                f"{f['format_id']} - {f['format_note']} - {f['ext']}"
+                f"{f['format_id']} - {f.get('format_note', 'Unknown quality')} - {f['ext']}"
                 for f in formats if "url" in f
             ]
 
-        quality_dropdown.options = [ft.dropdown.Option(option) for option in quality_options]
-        quality_dropdown.value = quality_options[0] if quality_options else None
-        quality_dropdown.disabled = False
-        download_button.disabled = False
+        if quality_options:
+            quality_dropdown.options = [ft.dropdown.Option(option) for option in quality_options]
+            quality_dropdown.value = quality_options[0]
+            quality_dropdown.disabled = False
+            download_button.disabled = False
+        else:
+            page.snack_bar = ft.SnackBar(ft.Text("No downloadable formats found!"))
+            page.snack_bar.open = True
+
         page.update()
     except Exception as e:
         page.snack_bar = ft.SnackBar(ft.Text(f"Error: {str(e)}"))
         page.snack_bar.open = True
         page.update()
 
-def generate_download_url(url, format_id, download_button):
-    """Get the direct download link and update the button."""
+def generate_download_url(url, format_id):
+    """Get the direct download link for the selected format."""
     if not url.strip() or not format_id:
         return None
 
@@ -60,7 +67,7 @@ def main(page: ft.Page):
         "Download",
         disabled=True,
         on_click=lambda e: page.launch_url(
-            generate_download_url(url_input.value, quality_dropdown.value, download_button)
+            generate_download_url(url_input.value, quality_dropdown.value)
         ),
     )
 
