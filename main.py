@@ -1,91 +1,134 @@
 import flet as ft
-from yt_dlp import YoutubeDL
+import requests
+import os
+import json
+import time
 
-def fetch_video_formats(url, page, quality_dropdown, download_button):
-    """Fetch available formats for the given YouTube URL."""
-    if not url.strip():
-        page.snack_bar = ft.SnackBar(ft.Text("Please enter a YouTube URL"))
-        page.snack_bar.open = True
-        page.update()
-        return
-
-    try:
-        page.snack_bar = ft.SnackBar(ft.Text("Fetching video formats..."))
-        page.snack_bar.open = True
-        page.update()
-
-        ydl_opts = {"quiet": True, "noplaylist": True}
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            formats = info.get("formats", [])
-            
-            # Safely extract format details with fallback for format_note
-            quality_options = [
-                f"{f['format_id']} - {f.get('format_note', 'Unknown quality')} - {f['ext']}"
-                for f in formats if "url" in f
-            ]
-
-        if quality_options:
-            quality_dropdown.options = [ft.dropdown.Option(option) for option in quality_options]
-            quality_dropdown.value = quality_options[0]
-            quality_dropdown.disabled = False
-            download_button.disabled = False
-        else:
-            page.snack_bar = ft.SnackBar(ft.Text("No downloadable formats found!"))
-            page.snack_bar.open = True
-
-        page.update()
-    except Exception as e:
-        page.snack_bar = ft.SnackBar(ft.Text(f"Error: {str(e)}"))
-        page.snack_bar.open = True
-        page.update()
-
-def generate_download_url(url, format_id):
-    """Get the direct download link for the selected format."""
-    if not url.strip() or not format_id:
-        return None
-
-    try:
-        ydl_opts = {"quiet": True, "noplaylist": True}
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            formats = info.get("formats", [])
-            selected_format = next(
-                (f for f in formats if f["format_id"] == format_id.split(" - ")[0]), None
-            )
-            return selected_format.get("url") if selected_format else None
-    except Exception:
-        return None
+# Replace with your DeepSeek API key
+DEEPSEEK_API_KEY = os.getenv("sk-b2897ac0c3ab428ca2edbbc96f6f2c69")
+API_ENDPOINT = "https://api.deepseek.com/v1/chat/completions"
 
 def main(page: ft.Page):
-    page.title = "YouTube Downloader (Download Button)"
-    page.scroll = ft.ScrollMode.ADAPTIVE
+    page.title = "DeepSeek Chat"
+    page.horizontal_alignment = "stretch"
+    page.theme_mode = ft.ThemeMode.LIGHT
+    page.padding = 20
 
-    url_input = ft.TextField(label="YouTube URL", expand=True)
-    quality_dropdown = ft.Dropdown(label="Select Video Quality", expand=True, disabled=True)
-    download_button = ft.ElevatedButton(
-        "Download",
-        disabled=True,
-        on_click=lambda e: page.launch_url(
-            generate_download_url(url_input.value, quality_dropdown.value)
-        ),
+    # Initialize chat messages list
+    messages = ft.ListView(
+        expand=True,
+        spacing=10,
+        auto_scroll=True,
     )
 
-    fetch_button = ft.ElevatedButton(
-        "Fetch Formats",
-        on_click=lambda e: fetch_video_formats(url_input.value, page, quality_dropdown, download_button),
+    # Create loading indicator
+    loading_indicator = ft.ProgressRing(visible=False)
+
+    # Input field and send button
+    user_input = ft.TextField(
+        hint_text="Type your message...",
+        expand=True,
+        multiline=True,
+        min_lines=1,
+        max_lines=5,
     )
 
+    async def send_message(e):
+        if not user_input.value.strip():
+            return
+
+        # Add user message
+        messages.controls.append(
+            ft.Container(
+                ft.Markdown(
+                    user_input.value,
+                    extension_set="gitHubWeb",
+                    code_theme="atom-one-dark",
+                ),
+                alignment=ft.alignment.center_right,
+                bgcolor=ft.colors.BLUE_100,
+                padding=10,
+                border_radius=10,
+            )
+        )
+
+        # Show loading indicator
+        loading_indicator.visible = True
+        await page.update_async()
+
+        try:
+            # Prepare API request
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
+            }
+
+            data = {
+                "model": "deepseek-chat",
+                "messages": [{"role": "user", "content": user_input.value}],
+                "temperature": 0.7
+            }
+
+            # Make API call
+            response = requests.post(
+                API_ENDPOINT,
+                headers=headers,
+                json=data,
+                timeout=30
+            )
+            response.raise_for_status()
+
+            # Parse response
+            result = response.json()
+            reply = result['choices'][0]['message']['content']
+
+            # Add bot response
+            messages.controls.append(
+                ft.Container(
+                    ft.Markdown(
+                        reply,
+                        extension_set="gitHubWeb",
+                        code_theme="atom-one-dark",
+                    ),
+                    alignment=ft.alignment.center_left,
+                    bgcolor=ft.colors.GREEN_100,
+                    padding=10,
+                    border_radius=10,
+                )
+            )
+
+        except Exception as e:
+            messages.controls.append(
+                ft.Text(f"Error: {str(e)}", color=ft.colors.RED)
+            )
+        finally:
+            # Hide loading indicator and clear input
+            loading_indicator.visible = False
+            user_input.value = ""
+            await page.update_async()
+
+    send_button = ft.IconButton(
+        icon=ft.icons.SEND,
+        on_click=send_message,
+        tooltip="Send message",
+    )
+
+    # Build the UI
     page.add(
         ft.Column(
             [
-                ft.Row([url_input, fetch_button], alignment="center"),
-                quality_dropdown,
-                download_button,
+                ft.Row(
+                    [ft.Text("DeepSeek Chat", style=ft.TextThemeStyle.HEADLINE_MEDIUM)],
+                    alignment=ft.MainAxisAlignment.CENTER
+                ),
+                ft.Divider(),
+                messages,
+                loading_indicator,
+                ft.Row([user_input, send_button])
             ],
-            alignment="center",
             expand=True,
         )
     )
 
-ft.app(target=main, view=ft.WEB_BROWSER)
+if __name__ == "__main__":
+    ft.app(target=main, view=ft.AppView.WEB_BROWSER)
